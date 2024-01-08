@@ -23,6 +23,8 @@ from plyfile import PlyData, PlyElement
 from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
 
+import open3d as o3d
+
 class CameraInfo(NamedTuple):
     uid: int
     R: np.array
@@ -66,6 +68,9 @@ def getNerfppNorm(cam_info):
     return {"translate": translate, "radius": radius}
 
 def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
+    print(f'Reading {len(cam_extrinsics)} cameras')
+    print(f'Camera intrinsic: {cam_intrinsics}')
+    print(f'Images folder: {images_folder}')
     cam_infos = []
     for idx, key in enumerate(cam_extrinsics):
         sys.stdout.write('\r')
@@ -109,7 +114,20 @@ def fetchPly(path):
     vertices = plydata['vertex']
     positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
     colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
-    normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    if 'nx' not in vertices.dtype.names:
+        normals = np.zeros_like(positions)
+    else:
+        normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    return BasicPointCloud(points=positions, colors=colors, normals=normals)
+
+def fetchOpen3DPly(path):
+    plydata = o3d.io.read_point_cloud(path)
+    positions = np.asarray(plydata.points)
+    colors = np.asarray(plydata.colors)
+    if plydata.has_normals():
+        normals = np.asarray(plydata.normals)
+    else:
+        normals = np.zeros_like(positions)
     return BasicPointCloud(points=positions, colors=colors, normals=normals)
 
 def storePly(path, xyz, rgb):
@@ -254,7 +272,133 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
                            ply_path=ply_path)
     return scene_info
 
+# StructureD 3D data set
+"""root_folder
+    source_views
+        scene_00000_492165.png
+        scene_00001_906323.png
+        ...
+    source_depths
+        scene_00000_492165.png
+        scene_00001_906323.png
+        ...
+    source_layouts
+        scene_00000_492165.txt
+        scene_00001_906323.txt
+        ...
+    source_cameras
+        scene_00000_492165.txt
+        scene_00001_906323.txt
+        ...
+    target_views
+        scene_00000_492165_0.png
+        scene_00000_492165_1.png
+        scene_00000_492165_2.png
+        ...
+    target_cameras
+        scene_00000_492165_0.txt
+        scene_00000_492165_1.txt
+        scene_00000_492165_2.txt
+        ...
+    points3d.ply
+"""
+def read_split_file(split_file:str):
+    splits = []
+    with open(split_file, "r") as f:
+        while True:
+            line = f.readline()
+            if not line:
+                break
+            splits.append(line.strip())
+    return splits
+
+def read_camera_pose_file(cam_pose_file:str):
+    cam_poses = []
+    with open(cam_pose_file, "r") as f:
+        while True:
+            line = f.readline()
+            if not line:
+                break
+            cam_poses.append(np.array([float(x) for x in line.strip().split(" ")]))
+    return cam_poses
+
+def readST3DSceneInfo(scene_path:str, is_eval:bool):
+    cam_infos_lst = []
+    rgb_images_lst = [fn for fn in os.listdir(os.path.join(scene_path)) if fn.startswith('image_')]
+    rgb_images_lst.sort(key=lambda x: int(x.split('_')[-1].split('.')[0]))
+
+    cam_pose_file = os.path.join(scene_path, "cameras.txt")
+    cam_poses = read_camera_pose_file(cam_pose_file)
+
+    assert len(cam_poses) == len(rgb_images_lst)
+    for idx, img_file in enumerate(rgb_images_lst):
+        sys.stdout.write('\r')
+        # the exact output you're looking for:
+        sys.stdout.write("Reading camera {}/{}".format(idx+1, len(rgb_images_lst)))
+        sys.stdout.flush()
+
+        image_path = os.path.join(scene_path, img_file)
+        image_name = img_file
+        image = Image.open(image_path)
+
+        # # load camera location
+        # if image_name.startswith("source"):
+        #     cam_pose_file = os.path.join(scene_path, "source_camera.txt")
+        # elif image_name.startswith("target"):
+        #     image_idx = int(image_name.split("_")[-1])
+        #     cam_pose_file = os.path.join(scene_path, f"target_camera_{image_idx}.txt")
+        
+        # cam_center = np.loadtxt(cam_pose_file)
+        # convert c2w to w2c
+        cam_center = -cam_poses[idx][:3]
+        print(f'image_name: {image_name} cam_center: {cam_center}, shape: {cam_center.shape}')
+        cam_infos_lst.append(CameraInfo(uid=idx, R=np.eye(3), T=cam_center, FovY=180, FovX=360, image=image,
+                            image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1]))
+    sys.stdout.write('\n')
+
+    train_split_file = os.path.join(scene_path, "train.txt")
+    test_split_file = os.path.join(scene_path, "test.txt")
+    train_splits = read_split_file(train_split_file)
+
+    if is_eval:
+        train_cam_infos = [c for idx, c in enumerate(cam_infos_lst) if c.image_name in train_splits or c.image_name == "image_0.png"]
+        # print(f'train_splits: {train_splits}')
+        if os.path.exists(test_split_file):
+            test_splits = read_split_file(test_split_file)
+            test_cam_infos = [c for idx, c in enumerate(cam_infos_lst) if c.image_name in test_splits]
+            # print(f'test_splits: {test_splits}')
+    else:
+        train_cam_infos = cam_infos_lst
+        test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    ply_path = os.path.join(scene_path, "points3d.ply")
+    # if not os.path.exists(ply_path):
+    #     # Since this data set has no colmap data, we start with random points
+    #     num_pts = 100_000
+    #     print(f"Generating random point cloud ({num_pts})...")
+        
+    #     # We create random points inside the bounds of the synthetic Blender scenes
+    #     xyz = np.random.random((num_pts, 3)) * 2.6 - 1.3
+    #     shs = np.random.random((num_pts, 3)) / 255.0
+    #     pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
+
+    #     storePly(ply_path, xyz, SH2RGB(shs) * 255)
+    try:
+        pcd = fetchOpen3DPly(ply_path)
+    except:
+        pcd = None
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                            ply_path=ply_path)
+    return scene_info
+
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
-    "Blender" : readNerfSyntheticInfo
+    "Blender" : readNerfSyntheticInfo,
+    "ST3D": readST3DSceneInfo
 }

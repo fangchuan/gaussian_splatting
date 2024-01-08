@@ -22,6 +22,9 @@ from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 
 class GaussianModel:
+    """ 
+    This class implements the 3D Gaussian model for a point cloud.
+    """
 
     def setup_functions(self):
         def build_covariance_from_scaling_rotation(scaling, scaling_modifier, rotation):
@@ -42,15 +45,22 @@ class GaussianModel:
 
 
     def __init__(self, sh_degree : int):
+        # spherical harmonics degree
         self.active_sh_degree = 0
         self.max_sh_degree = sh_degree  
+        # location
         self._xyz = torch.empty(0)
+        # SH feature
         self._features_dc = torch.empty(0)
         self._features_rest = torch.empty(0)
+        # scale vector
         self._scaling = torch.empty(0)
+        # rotation quaternion
         self._rotation = torch.empty(0)
+        # opacity
         self._opacity = torch.empty(0)
         self.max_radii2D = torch.empty(0)
+        # position gradient
         self.xyz_gradient_accum = torch.empty(0)
         self.denom = torch.empty(0)
         self.optimizer = None
@@ -133,6 +143,7 @@ class GaussianModel:
 
         dist2 = torch.clamp_min(distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()), 0.0000001)
         scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)
+        print(f'Initial scales: {scales.shape}')
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1
 
@@ -140,7 +151,9 @@ class GaussianModel:
 
         self._xyz = nn.Parameter(fused_point_cloud.requires_grad_(True))
         self._features_dc = nn.Parameter(features[:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True))
+        print(f'features_dc: {self._features_dc.shape}')
         self._features_rest = nn.Parameter(features[:,:,1:].transpose(1, 2).contiguous().requires_grad_(True))
+        print(f'features_rest: {self._features_rest.shape}')
         self._scaling = nn.Parameter(scales.requires_grad_(True))
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._opacity = nn.Parameter(opacities.requires_grad_(True))

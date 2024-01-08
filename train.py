@@ -15,24 +15,27 @@ from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
 import sys
-from scene import Scene, GaussianModel
+from scene import Scene, GaussianModel, IndoorScene, cameras
 from utils.general_utils import safe_state
 import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+import numpy as np
+from PIL import Image
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
 except ImportError:
     TENSORBOARD_FOUND = False
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+def training(dataset:dict, opt:dict, pipe:dict, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint:str, debug_from):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
-    scene = Scene(dataset, gaussians)
+    # scene = Scene(dataset, gaussians)
+    scene = IndoorScene(dataset, gaussians)
     gaussians.training_setup(opt)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
@@ -56,6 +59,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 net_image_bytes = None
                 custom_cam, do_training, pipe.convert_SHs_python, pipe.compute_cov3D_python, keep_alive, scaling_modifer = network_gui.receive()
                 if custom_cam != None:
+                    print(f'Custom camera received: {custom_cam.image_name}')
                     net_image = render(custom_cam, gaussians, pipe, background, scaling_modifer)["render"]
                     net_image_bytes = memoryview((torch.clamp(net_image, min=0, max=1.0) * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy())
                 network_gui.send(net_image_bytes, dataset.source_path)
@@ -76,15 +80,23 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if not viewpoint_stack:
             viewpoint_stack = scene.getTrainCameras().copy()
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
-
+        viewpoint_cam : cameras.Camera
         # Render
         if (iteration - 1) == debug_from:
+            print("Debugging from iteration {}".format(iteration))
             pipe.debug = True
 
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
-        render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
+        # render_pkg = render(viewpoint_cam, gaussians, pipe, bg, b_print_rasterization_settings=True if (iteration == first_iter or iteration % 1000 == 0 )else False)
+        render_pkg = render(viewpoint_cam, gaussians, pipe, bg, b_print_rasterization_settings=False)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+        if iteration in saving_iterations:
+            print(f"Saving rendered image for iteration {viewpoint_cam.image_name}, {viewpoint_cam.T}")
+            rendered_img = (torch.clamp(image, min=0, max=1.0) * 255).permute(1, 2, 0)
+            rendered_img = rendered_img.detach().cpu().numpy()
+            rendered_img = rendered_img.astype(np.uint8)
+            Image.fromarray(rendered_img).save(os.path.join(dataset.model_path, f"rendered_{iteration}.png"))
 
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
@@ -153,7 +165,7 @@ def prepare_output_and_logger(args):
         print("Tensorboard not available: not logging progress")
     return tb_writer
 
-def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs):
+def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : IndoorScene, renderFunc, renderArgs):
     if tb_writer:
         tb_writer.add_scalar('train_loss_patches/l1_loss', Ll1.item(), iteration)
         tb_writer.add_scalar('train_loss_patches/total_loss', loss.item(), iteration)
@@ -200,8 +212,8 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 14_000, 21_000, 28_000, 30_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[2_000, 7_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
@@ -216,7 +228,14 @@ if __name__ == "__main__":
     # Start GUI server, configure and run training
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    training(dataset=lp.extract(args), 
+             opt=op.extract(args), 
+             pipe=pp.extract(args), 
+             testing_iterations=args.test_iterations, 
+             saving_iterations=args.save_iterations, 
+             checkpoint_iterations=args.checkpoint_iterations, 
+             checkpoint=args.start_checkpoint, 
+             debug_from=args.debug_from)
 
     # All done
     print("\nTraining complete.")
