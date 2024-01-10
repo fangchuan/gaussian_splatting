@@ -356,7 +356,7 @@ def readST3DSceneInfo(scene_path:str, is_eval:bool, is_use_cubemap:bool=False):
     assert len(cam_poses) == len(rgb_images_lst)
 
     if is_use_cubemap:
-        e2c = Equirec2Cube(equ_h=512, equ_w=1024, face_w=512)
+        e2c = Equirec2Cube(equ_h=512, equ_w=1024, face_w=256)
         # R_raw_cubemap = R.from_rotvec(-np.pi/2 * np.array([1, 0, 0])).as_matrix()
         R_raw_cubemap = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]])
         R_cubemap_raw = R_raw_cubemap.transpose()
@@ -389,7 +389,7 @@ def readST3DSceneInfo(scene_path:str, is_eval:bool, is_use_cubemap:bool=False):
             raw_cam_center_w_c = cam_poses[idx][:3]
             new_cam_center_w_c = T_cubemap_raw[:3,:3] @ raw_cam_center_w_c + T_cubemap_raw[:3,3]
             for i in range(6):
-                cubemap_img = cubemap_imgs[:,i*512:(i+1)*512,:]
+                cubemap_img = cubemap_imgs[:,i*256:(i+1)*256,:]
                 cubemap_img = Image.fromarray(cubemap_img)
                 T_ref_subview = cubemap_poses[i]
                 cubemap_dir = os.path.join(scene_path, 'cubemap_images')
@@ -439,6 +439,7 @@ def readST3DSceneInfo(scene_path:str, is_eval:bool, is_use_cubemap:bool=False):
         raw_points = np.transpose(raw_points)
         points_in_cam = R_cubemap_raw @ raw_points
         o3d_raw_pcl.points = o3d.utility.Vector3dVector(np.transpose(points_in_cam))
+        ply_path = os.path.join(scene_path, "points3d_cubemap.ply")
         o3d.io.write_point_cloud(ply_path, o3d_raw_pcl)
     # if not os.path.exists(ply_path):
     #     # Since this data set has no colmap data, we start with random points

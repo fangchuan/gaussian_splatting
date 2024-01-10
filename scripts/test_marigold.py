@@ -25,9 +25,8 @@ def predict_depthes(image_folder: str):
 
     pipe.to("cuda")
 
-    # image_folder = "/mnt/nas_3dv/hdd1/datasets/Structured3d/SPGS_2/scene_00000_492165/cubemap_images"
-
-    images_lst = [f for f in os.listdir(image_folder) if os.path.isfile(os.path.join(image_folder, f))]
+    # images_lst = [f for f in os.listdir(image_folder) if os.path.isfile(os.path.join(image_folder, f))]
+    images_lst = ['image_0_0.png', 'image_0_1.png', 'image_0_2.png', 'image_0_3.png', 'image_0_4.png', 'image_0_5.png']
 
     for image_name in images_lst:
         img_path_or_url = os.path.join(image_folder, image_name)
@@ -54,6 +53,8 @@ def predict_depthes(image_folder: str):
 
         # Save colorized depth map
         # depth_colored.save("./depth_colored.png")
+
+
 def unproject_depth(depth_img_filepath:str, hfov:float, WIDTH:int):
     # hfov = 90.0 * np.pi / 180.0
     K = np.array([
@@ -92,7 +93,7 @@ def reconstruct_pointcloud(image_folder:str):
         depth_img_path = os.path.join(image_folder, "{}_depth.png".format(image_name.split(".")[0]))
         rgb_img = np.asarray(Image.open(rgb_img_path))
         rgb_img = rgb_img.astype(np.float32) / 255.0
-        subview_pcl = unproject_depth(depth_img_path, hfov=90.0 * np.pi / 180.0, WIDTH=512)
+        subview_pcl = unproject_depth(depth_img_path, hfov=90.0 * np.pi / 180.0, WIDTH=256)
 
         subview_idx = int(image_name.split("_")[2].split(".")[0])
         # chose front as reference view
