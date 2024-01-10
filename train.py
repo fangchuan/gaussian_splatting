@@ -92,7 +92,7 @@ def training(dataset:dict, opt:dict, pipe:dict, testing_iterations, saving_itera
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg, b_print_rasterization_settings=False)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
         if iteration in saving_iterations:
-            print(f"Saving rendered image for iteration {viewpoint_cam.image_name}, {viewpoint_cam.T}")
+            print(f"Saving rendered image for iteration {viewpoint_cam.image_name}, {viewpoint_cam.camera_center}")
             rendered_img = (torch.clamp(image, min=0, max=1.0) * 255).permute(1, 2, 0)
             rendered_img = rendered_img.detach().cpu().numpy()
             rendered_img = rendered_img.astype(np.uint8)

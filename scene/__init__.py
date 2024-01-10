@@ -116,7 +116,7 @@ class IndoorScene:
         self.test_cameras = {}
         if len(glob(os.path.join(dataset_args.source_path, "layout.txt"))) > 0:
             print("Found layout.txt file, assuming ST3D scene dataset!")
-            scene_info = sceneLoadTypeCallbacks["ST3D"](scene_path=dataset_args.source_path, is_eval=dataset_args.eval)
+            scene_info = sceneLoadTypeCallbacks["ST3D"](scene_path=dataset_args.source_path, is_eval=dataset_args.eval, is_use_cubemap=dataset_args.use_cubemap)
         else:
             assert False, "Could not recognize scene type!"
 

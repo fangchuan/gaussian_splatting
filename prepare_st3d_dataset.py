@@ -8,8 +8,9 @@ import shutil
 from tqdm import tqdm
 from glob import glob
 
+import cv2
 import numpy as np
-from utils.pano_utils import vis_color_pointcloud
+from utils.pano_utils import vis_color_pointcloud, Equirec2Cube
 
 def read_PNVS_split_file(split_file:str):
     splits = {}
@@ -66,6 +67,7 @@ def process_dataset(raw_dataset_dir:str, output_dir:str, is_verbose:bool):
 
     splits = ['easy', 'hard']
 
+    erp2cubemap = Equirec2Cube(equ_h=512, equ_w=1024, face_w=512)
     for split in splits:
         dataset_dir = os.path.join(raw_dataset_dir, split)            
         source_view_folder = os.path.join(dataset_dir, "source_image")
@@ -108,6 +110,17 @@ def process_dataset(raw_dataset_dir:str, output_dir:str, is_verbose:bool):
             saved_src_layout_path = os.path.join(scene_output_dir, "layout.txt")
             if not os.path.exists(saved_src_img_path) or not os.path.exists(saved_src_depth_path) or not os.path.exists(saved_src_layout_path):
                 shutil.copyfile(src_rgb_img_path, saved_src_img_path)
+                # src_img = cv2.imread(src_rgb_img_path)
+                # src_img = cv2.cvtColor(src_img, cv2.COLOR_BGR2RGB)
+                # cubemap_imgs = erp2cubemap.run(src_img)
+                # print(f'cubemap_imgs shape: {cubemap_imgs.shape}')
+                # cubemap_dir = os.path.join(scene_output_dir, "cubemap_images")
+                # if not os.path.exists(cubemap_dir):
+                #     os.makedirs(cubemap_dir)
+                # for i in range(6):
+                #     cubemap_img = cubemap_imgs[:,i*512:(i+1)*512,:]
+                #     cubemap_img = cv2.cvtColor(cubemap_img, cv2.COLOR_RGB2BGR)
+                #     cv2.imwrite(os.path.join(cubemap_dir, f'cubemap_{i}.png'), cubemap_img)
                 shutil.copyfile(src_depth_img_path, saved_src_depth_path)
                 # np.savetxt(saved_src_cam_path, np.zeros((3, )))
                 # cameras_lst.append(np.zeros((3, )))
@@ -169,7 +182,7 @@ def process_dataset(raw_dataset_dir:str, output_dir:str, is_verbose:bool):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_path", default="/mnt/nas_3dv/hdd1/datasets/Structured3d/PNVS/")
-    parser.add_argument("--output_path", default="/mnt/nas_3dv/hdd1/datasets/Structured3d/SPGS_2/")
+    parser.add_argument("--output_path", default="/mnt/nas_3dv/hdd1/datasets/Structured3d/SPGS_3/")
     parser.add_argument("--verbose", default=True, type=bool)
     args = parser.parse_args()
 
